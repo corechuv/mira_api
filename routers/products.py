@@ -6,15 +6,14 @@ from models import ProductsQuery, ProductsPage, ProductOut, PageOut
 
 router = APIRouter(prefix="/products", tags=["products"])
 
-SUPPORTED_LOCALES = {"ru", "en", "de", "uk"}  # добавили uk
-ALIASES = {"ua": "uk"}  # принимаем ua как алиас
+SUPPORTED_LOCALES = {"ru", "en", "de", "uk"}   # + uk
+ALIASES = {"ua": "uk"}                         # принимать ua как алиас
 
 def normalize_locale(locale: str | None) -> str | None:
     if not locale:
         return None
     loc = locale.lower()
-    if loc in ALIASES:
-        loc = ALIASES[loc]
+    loc = ALIASES.get(loc, loc)
     return loc if loc in SUPPORTED_LOCALES else None
 
 
@@ -29,14 +28,25 @@ async def list_products(
     where: list[str] = []
     params: dict = {"limit": q.limit, "offset": q.offset}
 
+    # поиск: если есть локаль — ищем по coalesce(i_loc, p), иначе только по p.*
     if q.search:
         params["q"] = f"%{q.search.lower()}%"
-        # ищем по локализованным полям, если есть; иначе по базовым
-        where.append(
-            "(lower(coalesce(i_loc.title, p.title)) like %(q)s "
-            " or lower(coalesce(i_loc.short, p.short)) like %(q)s "
-            " or lower(coalesce(i_loc.description, p.description)) like %(q)s)"
-        )
+        if loc:
+            where.append(
+                "("
+                " lower(coalesce(i_loc.title, p.title)) like %(q)s"
+                " or lower(coalesce(i_loc.short, p.short)) like %(q)s"
+                " or lower(coalesce(i_loc.description, p.description)) like %(q)s"
+                ")"
+            )
+        else:
+            where.append(
+                "("
+                " lower(p.title) like %(q)s"
+                " or lower(p.short) like %(q)s"
+                " or lower(p.description) like %(q)s"
+                ")"
+            )
 
     if q.category:
         where.append("p.category = %(category)s")
@@ -64,20 +74,35 @@ async def list_products(
     }[q.sort]
 
     where_sql = (" where " + " and ".join(where)) if where else ""
-    join_loc = "LEFT JOIN product_i18n i_loc ON i_loc.product_id = p.id AND i_loc.locale = %(loc)s" if loc else ""
+
+    # джойн только если локаль есть
+    join_loc = ""
     if loc:
         params["loc"] = loc
+        join_loc = "LEFT JOIN product_i18n i_loc ON i_loc.product_id = p.id AND i_loc.locale = %(loc)s"
+
+    # колонки: если локаль есть — coalesce(i_loc, p), иначе — p.*
+    if loc:
+        sel_slug  = "coalesce(i_loc.slug, p.slug)"
+        sel_title = "coalesce(i_loc.title, p.title)"
+        sel_short = "coalesce(i_loc.short, p.short)"
+        sel_desc  = "coalesce(i_loc.description, p.description)"
+    else:
+        sel_slug  = "p.slug"
+        sel_title = "p.title"
+        sel_short = "p.short"
+        sel_desc  = "p.description"
 
     sql_count = f"select count(*) as c from products p {join_loc}{where_sql}"
     sql_items = f"""
       select
         p.id::text,
-        coalesce(i_loc.slug, p.slug) as slug,
-        coalesce(i_loc.title, p.title) as title,
+        {sel_slug} as slug,
+        {sel_title} as title,
         p.category, p.sub, p.leaf,
         p.price::float, p.rating::float,
-        coalesce(i_loc.short, p.short) as short,
-        coalesce(i_loc.description, p.description) as description,
+        {sel_short} as short,
+        {sel_desc} as description,
         p.image_url as "imageUrl"
       from products p
       {join_loc}
@@ -101,15 +126,15 @@ async def list_products(
 @router.get("/{slug}", response_model=ProductOut | None)
 async def get_product(
     slug: str,
-    locale: str | None = Query(None, description="ru|en|de|uk (ua → uk); поиск по локализованному slug"),
+    locale: str | None = Query(None, description="ru|en|de|uk (ua → uk) — поиски по локализованному slug"),
     conn: AsyncConnection = Depends(get_conn),
 ):
     loc = normalize_locale(locale)
 
     async with dict_cursor(conn) as cur:
         if loc:
-            # 1) пробуем найти по локализованному slug в product_i18n
-            await cur.execute("""
+            # поиск по локализованному slug
+            await cur.execute(f"""
               select
                 p.id::text,
                 coalesce(i_loc.slug, p.slug) as slug,
@@ -128,7 +153,7 @@ async def get_product(
             if row:
                 return ProductOut.model_validate(row)
 
-        # 2) фолбэк — базовый slug из products
+        # фолбэк — базовый slug
         await cur.execute("""
           select
             id::text, slug, title, category, sub, leaf, price::float, rating::float,
