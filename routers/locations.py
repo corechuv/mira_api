@@ -6,19 +6,16 @@ import httpx
 router = APIRouter(prefix="/locations", tags=["locations"])
 
 DHL_KEY = (os.getenv("DHL_API_KEY") or "").strip()
+# ОБЯЗАТЕЛЬНО с /locations на конце:
 DHL_BASE_URL = (os.getenv("DHL_BASE_URL") or "https://api.dhl.com/location-finder/v1/locations").strip()
 
 # фронт шлёт "postfiliale", у DHL это "postoffice"
-TYPE_MAP = {
-    "packstation": "packstation",
-    "postfiliale": "postoffice",
-    "parcelshop": "parcelshop",
-}
+TYPE_MAP = {"packstation": "packstation", "postfiliale": "postoffice", "parcelshop": "parcelshop"}
 
 @router.get("")
 async def list_locations(
     zip: str = Query(..., alias="zip"),
-    city: str = Query("", description="можно пусто"),
+    city: str = Query(""),
     type: str = Query("packstation"),
     radius: int = Query(5, ge=1, le=50),
     results: int = Query(10, ge=1, le=50),
@@ -36,11 +33,7 @@ async def list_locations(
     if city.strip():
         params["city"] = city.strip()
 
-    headers = {
-        "Accept": "application/json",
-        "DHL-API-Key": DHL_KEY,  # именно это имя
-        # "Accept-Language": "de-DE",  # не обязательно
-    }
+    headers = {"Accept": "application/json", "DHL-API-Key": DHL_KEY}
 
     try:
         async with httpx.AsyncClient(timeout=10) as client:
@@ -51,12 +44,12 @@ async def list_locations(
     corr_id = resp.headers.get("Correlation-Id") or resp.headers.get("CorrelationId") or ""
 
     if resp.status_code == 401:
-        # даём максимально полезную подсказку и correlation id
+        # Возвращаем максимально полезную подсказку + correlation id
         raise HTTPException(
             424,
             detail=(
-                "DHL unauthorized (401). Verify your app is SUBSCRIBED to "
-                "Unified Location Finder **PRODUCTION**, and that you're using the **PROD API Key**. "
+                "DHL unauthorized (401). Проверьте, что приложение ПОДПИСАНО на Unified Location Finder "
+                "в **PRODUCTION**, и что вы используете **PROD API Key** (без лишних пробелов/скобок). "
                 f"Correlation-Id: {corr_id or 'n/a'}. Raw: {resp.text}"
             ),
         )
@@ -73,7 +66,6 @@ async def list_locations(
         geo = ((loc.get("location") or {}).get("geo")) or (loc.get("coordinates") or {})
         types_list = loc.get("types") or []
         loc_type = (types_list[0] if types_list else loc.get("type"))
-
         items.append({
             "id": loc.get("locationId") or loc.get("id"),
             "name": loc.get("name") or loc_type,

@@ -23,8 +23,6 @@ dist/
 .DS_Store
 .env
 .env.*
-recovery.txt
-recovery_2.txt
 schema.sql
 schema_patch.sql
 seed.sql
