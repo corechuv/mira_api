@@ -1,10 +1,13 @@
-# Requirements for the project
 fastapi==0.112.0
 uvicorn[standard]==0.30.5
 psycopg[binary,pool]==3.2.9
 python-dotenv==1.0.1
 passlib[bcrypt]==1.7.4
 PyJWT==2.9.0
-bcrypt
-python-dotenv
-stripeemail-validator==2.2.0
+bcrypt==4.3.0
+stripe==12.5.0
+email-validator==2.2.0
+# если используете Form/UploadFile, добавьте:
+# python-multipart==0.0.12
+# если стартуете через gunicorn:
+# gunicorn==22.0.0
