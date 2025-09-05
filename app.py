@@ -7,6 +7,7 @@ from fastapi.openapi.utils import get_openapi
 from db import pool
 from routers import products, reviews, addresses, orders, auth, categories
 from routers import payments
+from routers import locations
 
 ALLOWED_ORIGINS = [
     "http://localhost:5173",
@@ -41,6 +42,7 @@ app.include_router(auth)
 app.include_router(categories)
 
 app.include_router(payments.router)
+app.include_router(locations.router)
 
 # добавить Bearer-схему в OpenAPI (для удобства тестирования)
 def custom_openapi():
