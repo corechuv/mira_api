@@ -1,0 +1,33 @@
+# venv
+venv/
+.venv/
+ENV/
+# Python cache/bytecode
+__pycache__/
+*.py[cod]
+*.pyo
+# IDE
+.vscode/
+.idea/
+# Testing & type checking
+.pytest_cache/
+.mypy_cache/
+.coverage
+# Build artifacts
+build/
+dist/
+*.egg-info/
+# Secrets
+.env
+# OS
+.DS_Store
+.env
+.env.*
+recovery.txt
+recovery_2.txt
+schema.sql
+schema_patch.sql
+seed.sql
+seed_1.sql
+# do not commit recovery dumps
+recovery/
