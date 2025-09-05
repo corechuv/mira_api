@@ -5,14 +5,10 @@ import httpx
 
 router = APIRouter(prefix="/locations", tags=["locations"])
 
-# PROD ключ из DHL Developer Portal (App -> Show key)
-DHL_KEY = os.getenv("DHL_API_KEY", "").strip()
+DHL_KEY = (os.getenv("DHL_API_KEY") or "").strip()
+DHL_BASE_URL = (os.getenv("DHL_BASE_URL") or "https://api.dhl.com/location-finder/v1/locations").strip()
 
-# Всегда прод-хост (без песочницы)
-DHL_BASE_URL = os.getenv("DHL_BASE_URL", "https://api.dhl.com/location-finder/v1/locations").strip()
-
-# Фронт шлёт: packstation | postfiliale | parcelshop
-# DHL в проде принимает: packstation | postoffice | parcelshop
+# фронт шлёт "postfiliale", у DHL это "postoffice"
 TYPE_MAP = {
     "packstation": "packstation",
     "postfiliale": "postoffice",
@@ -22,32 +18,28 @@ TYPE_MAP = {
 @router.get("")
 async def list_locations(
     zip: str = Query(..., alias="zip"),
-    city: str = Query("", description="Опционально, можно пусто"),
-    type: str = Query("packstation", description="packstation | postfiliale | parcelshop"),
+    city: str = Query("", description="можно пусто"),
+    type: str = Query("packstation"),
     radius: int = Query(5, ge=1, le=50),
     results: int = Query(10, ge=1, le=50),
 ):
     if not DHL_KEY:
-        # 424, чтобы лог говорил прямо о конфиге
         raise HTTPException(424, detail="DHL lookup failed: DHL_API_KEY is not configured")
 
-    dhl_type = TYPE_MAP.get(type.lower().strip(), type.lower().strip())
-
-    # Собираем query; пустые значения не отправляем
     params = {
         "countryCode": "DE",
         "postalCode": zip,
-        "types": dhl_type,
+        "types": TYPE_MAP.get(type.lower().strip(), type.lower().strip()),
         "radius": radius,
         "limit": results,
     }
-    if city and city.strip():
+    if city.strip():
         params["city"] = city.strip()
 
     headers = {
         "Accept": "application/json",
-        "DHL-API-Key": DHL_KEY,  # точное имя заголовка
-        # (не обязательно, но можно) "Accept-Language": "de-DE",
+        "DHL-API-Key": DHL_KEY,  # именно это имя
+        # "Accept-Language": "de-DE",  # не обязательно
     }
 
     try:
@@ -56,33 +48,29 @@ async def list_locations(
     except httpx.RequestError as e:
         raise HTTPException(502, detail=f"DHL network error: {e!s}")
 
-    # Подсветим типовую проблему — не тот ключ/не та подписка
+    corr_id = resp.headers.get("Correlation-Id") or resp.headers.get("CorrelationId") or ""
+
     if resp.status_code == 401:
+        # даём максимально полезную подсказку и correlation id
         raise HTTPException(
             424,
-            detail=f"DHL unauthorized (401). "
-                   f"Check that your APP has Unified Location Finder in PRODUCTION "
-                   f"and you are using the PROD API key. Raw: {resp.text}",
+            detail=(
+                "DHL unauthorized (401). Verify your app is SUBSCRIBED to "
+                "Unified Location Finder **PRODUCTION**, and that you're using the **PROD API Key**. "
+                f"Correlation-Id: {corr_id or 'n/a'}. Raw: {resp.text}"
+            ),
         )
 
     if resp.status_code >= 400:
-        raise HTTPException(502, detail=f"DHL lookup failed ({resp.status_code}): {resp.text}")
+        raise HTTPException(502, detail=f"DHL lookup failed ({resp.status_code}) [CorrId: {corr_id or 'n/a'}]: {resp.text}")
 
     data = resp.json()
-
-    # Ответ у DHL: locations[], но на всякий случай поддержим items[]
     items_raw = data.get("locations") or data.get("items") or []
 
     items = []
     for loc in items_raw:
-        # адрес
         addr = (loc.get("address") or {})
-        # координаты встречаются как location.geo или coordinates
         geo = ((loc.get("location") or {}).get("geo")) or (loc.get("coordinates") or {})
-        lat = geo.get("latitude")
-        lng = geo.get("longitude")
-
-        # тип: либо массив types[], либо поле type
         types_list = loc.get("types") or []
         loc_type = (types_list[0] if types_list else loc.get("type"))
 
@@ -95,8 +83,8 @@ async def list_locations(
             "zip": addr.get("postalCode") or "",
             "city": addr.get("city") or "",
             "openingHours": loc.get("openingHours") or loc.get("openingTimes") or [],
-            "lat": lat,
-            "lng": lng,
+            "lat": geo.get("latitude"),
+            "lng": geo.get("longitude"),
         })
 
     return {"items": items}
