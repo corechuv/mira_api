@@ -24,7 +24,7 @@ app = FastAPI(title="Mira API", version="0.1.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173", "https://mira-client.netlify.app/", "https://shop.center-mira.com"],
+    allow_origins=["http://localhost:5174", "http://127.0.0.1:5174", "https://mira-client.netlify.app/", "https://shop.center-mira.com"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
